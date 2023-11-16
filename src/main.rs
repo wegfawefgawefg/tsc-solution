@@ -1,120 +1,40 @@
-use std::fs;
-use std::io::{Error as IOError, Write};
-use std::path::Path;
-use std::{
-    fs::File,
-    io::{Cursor, Read},
-};
+use std::fs::File;
 
-use byteorder::{BigEndian, ReadBytesExt};
+use clap::{arg, command, ArgAction};
 use etherparse::{SlicedPacket, TransportSlice};
 use pcap_file::pcap::PcapReader;
+use price_quote::PriceQuote;
 
-#[derive(Default, Debug)]
-pub struct ManPacket {
-    pub data_type: u16,
-    pub information_type: u16,
-    pub market_type: u8,
-    pub issue_code: String,
-    pub issue_seq_no: u32, // only 3 bytes
-    pub market_status_type: u16,
-    pub total_bid_quote_volume: u64,           // only 7 bytes
-    pub best_bid_price_1st: u64,               // 5 bytes
-    pub best_bid_quantity_1st: u64,            // 7 bytes
-    pub best_bid_price_2nd: u64,               // 5 bytes
-    pub best_bid_quantity_2nd: u64,            // 7 bytes
-    pub best_bid_price_3rd: u64,               // 5 bytes
-    pub best_bid_quantity_3rd: u64,            // 7 bytes
-    pub best_bid_price_4th: u64,               // 5 bytes
-    pub best_bid_quantity_4th: u64,            // 7 bytes
-    pub best_bid_price_5th: u64,               // 5 bytes
-    pub best_bid_quantity_5th: u64,            // 7 bytes
-    pub total_ask_quote_volume: u64,           // 7 bytes
-    pub best_ask_price_1st: u64,               // 5 bytes
-    pub best_ask_quantity_1st: u64,            // 7 bytes
-    pub best_ask_price_2nd: u64,               // 5 bytes
-    pub best_ask_quantity_2nd: u64,            // 7 bytes
-    pub best_ask_price_3rd: u64,               // 5 bytes
-    pub best_ask_quantity_3rd: u64,            // 7 bytes
-    pub best_ask_price_4th: u64,               // 5 bytes
-    pub best_ask_quantity_4th: u64,            // 7 bytes
-    pub best_ask_price_5th: u64,               // 5 bytes
-    pub best_ask_quantity_5th: u64,            // 7 bytes
-    pub no_of_best_bid_valid_quote_total: u64, // 5 bytes
-    pub no_of_best_bid_quote_1st: u32,
-    pub no_of_best_bid_quote_2nd: u32,
-    pub no_of_best_bid_quote_3rd: u32,
-    pub no_of_best_bid_quote_4th: u32,
-    pub no_of_best_bid_quote_5th: u32,
-    pub no_of_best_ask_valid_quote_total: u64, // 5 bytes
-    pub no_of_best_ask_quote_1st: u32,
-    pub no_of_best_ask_quote_2nd: u32,
-    pub no_of_best_ask_quote_3rd: u32,
-    pub no_of_best_ask_quote_4th: u32,
-    pub no_of_best_ask_quote_5th: u32,
-    pub quote_accept_time: u64,
-}
+pub mod price_quote;
 
-impl ManPacket {
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, IOError> {
-        let mut rdr = Cursor::new(bytes);
+fn main() {
+    let matches = command!() // uses metadata from Cargo.toml
+        .about("PCap Parser")
+        .arg(arg!([PATH] "Path to the pcap file").required(true))
+        .arg(
+            arg!(-r --sorted "Sort Quotes by Quote Accept Time")
+                .default_value("false")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            arg!(-b --big_file "Use this if pcap file is bigger than your ram")
+                .action(ArgAction::SetTrue),
+        )
+        .get_matches();
 
-        Ok(ManPacket {
-            data_type: rdr.read_u16::<BigEndian>()?,
-            information_type: rdr.read_u16::<BigEndian>()?,
-            market_type: rdr.read_u8()?,
-            issue_code: {
-                let mut buf = [0; 12]; // Adjust size as per your data
-                rdr.read_exact(&mut buf)?;
-                String::from_utf8_lossy(&buf).into_owned()
-            },
-            issue_seq_no: {
-                let mut buf = [0; 3];
-                rdr.read_exact(&mut buf)?;
-                (buf[0] as u32) << 16 | (buf[1] as u32) << 8 | buf[2] as u32
-            },
-            market_status_type: rdr.read_u16::<BigEndian>()?,
-            total_bid_quote_volume: rdr.read_uint::<BigEndian>(7)?,
-            best_bid_price_1st: rdr.read_uint::<BigEndian>(5)?,
-            best_bid_quantity_1st: rdr.read_uint::<BigEndian>(7)?,
-            best_bid_price_2nd: rdr.read_uint::<BigEndian>(5)?,
-            best_bid_quantity_2nd: rdr.read_uint::<BigEndian>(7)?,
-            best_bid_price_3rd: rdr.read_uint::<BigEndian>(5)?,
-            best_bid_quantity_3rd: rdr.read_uint::<BigEndian>(7)?,
-            best_bid_price_4th: rdr.read_uint::<BigEndian>(5)?,
-            best_bid_quantity_4th: rdr.read_uint::<BigEndian>(7)?,
-            best_bid_price_5th: rdr.read_uint::<BigEndian>(5)?,
-            best_bid_quantity_5th: rdr.read_uint::<BigEndian>(7)?,
-            total_ask_quote_volume: rdr.read_uint::<BigEndian>(7)?,
-            best_ask_price_1st: rdr.read_uint::<BigEndian>(5)?,
-            best_ask_quantity_1st: rdr.read_uint::<BigEndian>(7)?,
-            best_ask_price_2nd: rdr.read_uint::<BigEndian>(5)?,
-            best_ask_quantity_2nd: rdr.read_uint::<BigEndian>(7)?,
-            best_ask_price_3rd: rdr.read_uint::<BigEndian>(5)?,
-            best_ask_quantity_3rd: rdr.read_uint::<BigEndian>(7)?,
-            best_ask_price_4th: rdr.read_uint::<BigEndian>(5)?,
-            best_ask_quantity_4th: rdr.read_uint::<BigEndian>(7)?,
-            best_ask_price_5th: rdr.read_uint::<BigEndian>(5)?,
-            best_ask_quantity_5th: rdr.read_uint::<BigEndian>(7)?,
-            no_of_best_bid_valid_quote_total: rdr.read_uint::<BigEndian>(5)?,
-            no_of_best_bid_quote_1st: rdr.read_u32::<BigEndian>()?,
-            no_of_best_bid_quote_2nd: rdr.read_u32::<BigEndian>()?,
-            no_of_best_bid_quote_3rd: rdr.read_u32::<BigEndian>()?,
-            no_of_best_bid_quote_4th: rdr.read_u32::<BigEndian>()?,
-            no_of_best_bid_quote_5th: rdr.read_u32::<BigEndian>()?,
-            no_of_best_ask_valid_quote_total: rdr.read_uint::<BigEndian>(5)?,
-            no_of_best_ask_quote_1st: rdr.read_u32::<BigEndian>()?,
-            no_of_best_ask_quote_2nd: rdr.read_u32::<BigEndian>()?,
-            no_of_best_ask_quote_3rd: rdr.read_u32::<BigEndian>()?,
-            no_of_best_ask_quote_4th: rdr.read_u32::<BigEndian>()?,
-            no_of_best_ask_quote_5th: rdr.read_u32::<BigEndian>()?,
-            quote_accept_time: rdr.read_u64::<BigEndian>()?,
-        })
+    let path = matches.get_one::<String>("PATH").expect("no path provided");
+    let mut price_quotes = parse_price_quotes_from_file(path);
+
+    if *matches.get_one::<bool>("sorted").unwrap() {
+        price_quotes.sort_by(|a, b| a.quote_accept_time.cmp(&b.quote_accept_time));
+    }
+
+    for price_quote in price_quotes {
+        println!("{}", price_quote);
     }
 }
 
-fn main() {
-    let path = "./mdf-kospi200.20110216-0.pcap";
+pub fn parse_price_quotes_from_file(path: &str) -> Vec<PriceQuote> {
     let file = File::open(path).expect("couldn't read file");
     let mut reader = PcapReader::new(file).expect("failed to read pcap file");
 
@@ -122,92 +42,53 @@ fn main() {
     let mut non_udp = 0;
     let mut wrong_port = 0;
     let mut failed_to_parse_count = 0;
-    let mut man_packets: Vec<ManPacket> = vec![];
-
-    let mut failed_to_parse_packets = vec![];
-    let mut some_good_packets = vec![];
-    const MAX_GOOD_PACKETS: usize = 8;
+    let mut man_packets: Vec<PriceQuote> = vec![];
 
     while let Some(pcap_packet) = reader.next_packet() {
         packet_count += 1;
-        let packet = pcap_packet.expect("failed to get packet").data;
-        match SlicedPacket::from_ethernet(&packet) {
-            Ok(parsed_packet) => {
-                if let Some(TransportSlice::Udp(udp)) = parsed_packet.transport {
-                    let destination_port = udp.destination_port();
-                    if destination_port == 15515 || destination_port == 15516 {
-                        // Parse the ManPacket structure from the payload
-                        let payload = parsed_packet.payload;
-                        match ManPacket::from_bytes(payload) {
-                            Ok(man_packet) => {
-                                man_packets.push(man_packet);
-                                if some_good_packets.len() < MAX_GOOD_PACKETS {
-                                    some_good_packets.push((packet_count, payload.to_vec()));
-                                }
-                            }
-                            Err(err) => {
-                                failed_to_parse_packets.push((packet_count, payload.to_vec()));
-                                failed_to_parse_count += 1;
-                                eprintln!("Failed to parse ManPacket: {:?}", err);
-                            }
-                        }
-                    } else {
-                        wrong_port += 1;
-                    }
-                } else {
-                    non_udp += 1;
-                }
-            }
+        let pcap_packet = pcap_packet.expect("failed to get packet");
+        let packet = pcap_packet.data;
+
+        let parsed_packet = match SlicedPacket::from_ethernet(&packet) {
+            Ok(packet) => packet,
             Err(err) => {
                 eprintln!("Failed to parse packet: {:?}", err);
+                continue;
+            }
+        };
+
+        // skip if not udp
+        let udp = if let Some(TransportSlice::Udp(udp)) = parsed_packet.transport {
+            udp
+        } else {
+            non_udp += 1;
+            continue;
+        };
+
+        // skip if wrong port
+        let destination_port = udp.destination_port();
+        if destination_port != 15515 && destination_port != 15516 {
+            wrong_port += 1;
+            continue;
+        }
+
+        let packet_received_time = pcap_packet.timestamp;
+        let payload = parsed_packet.payload;
+        match PriceQuote::from_bytes(packet_received_time, payload) {
+            Ok(man_packet) => {
+                man_packets.push(man_packet);
+            }
+            Err(_) => {
+                failed_to_parse_count += 1;
             }
         }
     }
 
-    println!("{:?}", man_packets.first().unwrap());
     println!("parsed: {}", man_packets.len());
     println!("total_packets: {}", packet_count);
     println!("failed_to_parse: {}", failed_to_parse_count);
     println!("non_udp: {}", non_udp);
     println!("wrong_port: {}", wrong_port);
 
-    // save failed_packets
-    let dir_path = "failed_packets";
-    if !Path::new(dir_path).exists() {
-        fs::create_dir(dir_path).expect("Failed to create directory");
-    }
-
-    for (index, (count, payload)) in failed_to_parse_packets.iter().enumerate() {
-        let filename = format!("{}/failed_payload_{}_{}.bin", dir_path, index, count);
-        let mut file = File::create(&filename).expect("Failed to create file");
-
-        file.write_all(payload)
-            .expect("Failed to write payload to file");
-    }
-
-    println!(
-        "Saved {} failed payloads in {}",
-        failed_to_parse_packets.len(),
-        dir_path
-    );
-
-    // save some good packets for comparison
-    let dir_path = "good_packets";
-    if !Path::new(dir_path).exists() {
-        fs::create_dir(dir_path).expect("Failed to create directory");
-    }
-
-    for (index, (count, payload)) in some_good_packets.iter().enumerate() {
-        let filename = format!("{}/success_payload_{}_{}.bin", dir_path, index, count);
-        let mut file = File::create(&filename).expect("Failed to create file");
-
-        file.write_all(payload)
-            .expect("Failed to write payload to file");
-    }
-
-    println!(
-        "Saved {} failed payloads in {}",
-        some_good_packets.len(),
-        dir_path
-    );
+    man_packets
 }
