@@ -1,6 +1,6 @@
 use std::fmt;
-use std::io::Error as IOError;
 use std::io::{Cursor, Read};
+use std::io::{Error as IOError, ErrorKind};
 use std::time::Duration;
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
@@ -81,29 +81,29 @@ impl PriceQuote {
             market_status_type: rdr.read_u16::<LittleEndian>()?,
             total_bid_quote_volume: rdr.read_uint::<LittleEndian>(7)?,
 
-            best_bid_price_1st: rdr.read_uint::<LittleEndian>(5)?,
-            best_bid_quantity_1st: rdr.read_uint::<LittleEndian>(7)?,
-            best_bid_price_2nd: rdr.read_uint::<LittleEndian>(5)?,
-            best_bid_quantity_2nd: rdr.read_uint::<LittleEndian>(7)?,
-            best_bid_price_3rd: rdr.read_uint::<LittleEndian>(5)?,
-            best_bid_quantity_3rd: rdr.read_uint::<LittleEndian>(7)?,
-            best_bid_price_4th: rdr.read_uint::<LittleEndian>(5)?,
-            best_bid_quantity_4th: rdr.read_uint::<LittleEndian>(7)?,
-            best_bid_price_5th: rdr.read_uint::<LittleEndian>(5)?,
-            best_bid_quantity_5th: rdr.read_uint::<LittleEndian>(7)?,
+            best_bid_price_1st: Self::read_ascii_decimal(&mut rdr, 5)?,
+            best_bid_quantity_1st: Self::read_ascii_decimal(&mut rdr, 7)?,
+            best_bid_price_2nd: Self::read_ascii_decimal(&mut rdr, 5)?,
+            best_bid_quantity_2nd: Self::read_ascii_decimal(&mut rdr, 7)?,
+            best_bid_price_3rd: Self::read_ascii_decimal(&mut rdr, 5)?,
+            best_bid_quantity_3rd: Self::read_ascii_decimal(&mut rdr, 7)?,
+            best_bid_price_4th: Self::read_ascii_decimal(&mut rdr, 5)?,
+            best_bid_quantity_4th: Self::read_ascii_decimal(&mut rdr, 7)?,
+            best_bid_price_5th: Self::read_ascii_decimal(&mut rdr, 5)?,
+            best_bid_quantity_5th: Self::read_ascii_decimal(&mut rdr, 7)?,
 
             total_ask_quote_volume: rdr.read_uint::<LittleEndian>(7)?,
 
-            best_ask_price_1st: rdr.read_uint::<LittleEndian>(5)?,
-            best_ask_quantity_1st: rdr.read_uint::<LittleEndian>(7)?,
-            best_ask_price_2nd: rdr.read_uint::<LittleEndian>(5)?,
-            best_ask_quantity_2nd: rdr.read_uint::<LittleEndian>(7)?,
-            best_ask_price_3rd: rdr.read_uint::<LittleEndian>(5)?,
-            best_ask_quantity_3rd: rdr.read_uint::<LittleEndian>(7)?,
-            best_ask_price_4th: rdr.read_uint::<LittleEndian>(5)?,
-            best_ask_quantity_4th: rdr.read_uint::<LittleEndian>(7)?,
-            best_ask_price_5th: rdr.read_uint::<LittleEndian>(5)?,
-            best_ask_quantity_5th: rdr.read_uint::<LittleEndian>(7)?,
+            best_ask_price_1st: Self::read_ascii_decimal(&mut rdr, 5)?,
+            best_ask_quantity_1st: Self::read_ascii_decimal(&mut rdr, 7)?,
+            best_ask_price_2nd: Self::read_ascii_decimal(&mut rdr, 5)?,
+            best_ask_quantity_2nd: Self::read_ascii_decimal(&mut rdr, 7)?,
+            best_ask_price_3rd: Self::read_ascii_decimal(&mut rdr, 5)?,
+            best_ask_quantity_3rd: Self::read_ascii_decimal(&mut rdr, 7)?,
+            best_ask_price_4th: Self::read_ascii_decimal(&mut rdr, 5)?,
+            best_ask_quantity_4th: Self::read_ascii_decimal(&mut rdr, 7)?,
+            best_ask_price_5th: Self::read_ascii_decimal(&mut rdr, 5)?,
+            best_ask_quantity_5th: Self::read_ascii_decimal(&mut rdr, 7)?,
 
             no_of_best_bid_valid_quote_total: rdr.read_uint::<LittleEndian>(5)?,
             no_of_best_bid_quote_1st: rdr.read_u32::<LittleEndian>()?,
@@ -119,6 +119,16 @@ impl PriceQuote {
             no_of_best_ask_quote_5th: rdr.read_u32::<LittleEndian>()?,
             quote_accept_time: rdr.read_u64::<LittleEndian>()?,
         })
+    }
+
+    fn read_ascii_decimal(rdr: &mut Cursor<&[u8]>, len: usize) -> Result<u64, IOError> {
+        let mut buf = vec![0u8; len];
+        rdr.read_exact(&mut buf)?;
+
+        let s = std::str::from_utf8(&buf).map_err(|e| IOError::new(ErrorKind::InvalidData, e))?;
+
+        s.parse::<u64>()
+            .map_err(|e| IOError::new(ErrorKind::InvalidData, e))
     }
 }
 
@@ -179,7 +189,11 @@ pub fn format_pairs(pairs: &[(u64, u64)]) -> String {
 
     for (val, qty) in pairs.iter() {
         // write!(f, " {}{}{}", qty_str, "@".red(), price_str)?;
-        result.push_str(&format!(" {}{}{}", qty, "@".red(), val));
+        // get the last 2 digits of val
+        let val_start = val / 100;
+        let val_end = val % 100;
+
+        result.push_str(&format!(" {}{}{}.{}", qty, "@".red(), val_start, val_end));
     }
 
     result
