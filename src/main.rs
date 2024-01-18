@@ -17,6 +17,7 @@ fn main() {
                 .action(ArgAction::SetTrue),
         )
         .arg(
+            // UNINPLEMENTED
             arg!(-b --big_file "Use this if pcap file is bigger than your ram")
                 .action(ArgAction::SetTrue),
         )
@@ -34,7 +35,7 @@ fn main() {
         return;
     }
 
-    let mut price_quotes = parse_price_quotes_from_file(path);
+    let (mut price_quotes, parse_stats) = parse_price_quotes_from_file(path);
 
     if *matches.get_one::<bool>("sorted").unwrap() {
         price_quotes.sort_by(|a, b| a.quote_accept_time.cmp(&b.quote_accept_time));
@@ -43,22 +44,107 @@ fn main() {
     for price_quote in price_quotes {
         println!("{}", price_quote);
     }
+
+    // print the parse stats
+    println!("\n{}", parse_stats);
 }
 
-pub fn parse_price_quotes_from_file(path: &str) -> Vec<PriceQuote> {
+///////////////////////// PARSING /////////////////////////
+pub struct PacketParseStats {
+    pub parse_time: std::time::Duration,
+    pub packet_count: u64,
+
+    pub successfully_parsed: u64,
+    pub rejected: u64,
+    pub failed: u64,
+
+    pub non_udp: u64,
+    pub wrong_port: u64,
+    pub not_a_price_quote: u64,
+}
+
+impl PacketParseStats {
+    pub fn new() -> Self {
+        PacketParseStats {
+            parse_time: std::time::Duration::new(0, 0),
+            packet_count: 0,
+
+            successfully_parsed: 0,
+            rejected: 0,
+            failed: 0,
+
+            non_udp: 0,
+            wrong_port: 0,
+            not_a_price_quote: 0,
+        }
+    }
+}
+
+impl Default for PacketParseStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Display for PacketParseStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let duration = self.parse_time.as_millis() as f64;
+        let total = self.packet_count as f64;
+        let successfully_parsed = self.successfully_parsed as f64;
+        let rejected = self.rejected as f64;
+        let failed = self.failed as f64;
+
+        let non_udp = self.non_udp as f64;
+        let wrong_port = self.wrong_port as f64;
+        let not_a_price_quote = self.not_a_price_quote as f64;
+
+        writeln!(f, "Packet Parse Stats:")?;
+        writeln!(f, "  Parse Time: {:.2}ms", duration)?;
+        writeln!(f, "  Total Packets: {}", self.packet_count)?;
+        writeln!(
+            f,
+            "  Successfully Parsed: {} ({:.2}%)",
+            successfully_parsed,
+            successfully_parsed / total * 100.0
+        )?;
+        writeln!(
+            f,
+            "  Rejected: {} ({:.2}%)",
+            rejected,
+            rejected / total * 100.0
+        )?;
+        writeln!(f, "  Failed: {} ({:.2}%)", failed, failed / total * 100.0)?;
+        writeln!(
+            f,
+            "  Non UDP: {} ({:.2}%)",
+            non_udp,
+            non_udp / total * 100.0
+        )?;
+        writeln!(
+            f,
+            "  Wrong Port: {} ({:.2}%)",
+            wrong_port,
+            wrong_port / total * 100.0
+        )?;
+        writeln!(
+            f,
+            "  Not a Price Quote: {} ({:.2}%)",
+            not_a_price_quote,
+            not_a_price_quote / total * 100.0
+        )?;
+        Ok(())
+    }
+}
+
+pub fn parse_price_quotes_from_file(path: &str) -> (Vec<PriceQuote>, PacketParseStats) {
     let file = File::open(path).expect("couldn't read file");
     let mut reader = PcapReader::new(file).expect("failed to read pcap file");
 
-    //DEBUG ANALYTICS:
-    let mut packet_count = 0;
-    let mut non_udp = 0;
-    let mut wrong_port = 0;
-    let mut failed_to_parse_count = 0;
-    let mut not_a_price_quote = 0;
-
+    let start = std::time::Instant::now();
+    let mut parse_stats = PacketParseStats::new();
     let mut price_quotes: Vec<PriceQuote> = vec![];
     while let Some(pcap_packet) = reader.next_packet() {
-        packet_count += 1;
+        parse_stats.packet_count += 1;
 
         // try to parse packet
         let pcap_packet = pcap_packet.expect("failed to get packet");
@@ -75,14 +161,16 @@ pub fn parse_price_quotes_from_file(path: &str) -> Vec<PriceQuote> {
         let udp = if let Some(TransportSlice::Udp(udp)) = parsed_packet.transport {
             udp
         } else {
-            non_udp += 1;
+            parse_stats.non_udp += 1;
+            parse_stats.rejected += 1;
             continue;
         };
 
         // skip if wrong port
         let destination_port = udp.destination_port();
         if destination_port != 15515 && destination_port != 15516 {
-            wrong_port += 1;
+            parse_stats.wrong_port += 1;
+            parse_stats.rejected += 1;
             continue;
         }
 
@@ -90,7 +178,8 @@ pub fn parse_price_quotes_from_file(path: &str) -> Vec<PriceQuote> {
         let payload = parsed_packet.payload;
         const QUOTE_PACKET_PREFIX: &[u8; 5] = b"B6034";
         if !payload.starts_with(QUOTE_PACKET_PREFIX) {
-            not_a_price_quote += 1;
+            parse_stats.not_a_price_quote += 1;
+            parse_stats.rejected += 1;
             continue;
         }
 
@@ -102,17 +191,13 @@ pub fn parse_price_quotes_from_file(path: &str) -> Vec<PriceQuote> {
                 price_quotes.push(price_quote);
             }
             Err(_) => {
-                failed_to_parse_count += 1;
+                parse_stats.failed += 1;
             }
         }
     }
+    parse_stats.parse_time = start.elapsed();
 
-    // println!("parsed: {}", man_packets.len());
-    // println!("total_packets: {}", packet_count);
-    // println!("failed_to_parse: {}", failed_to_parse_count);
-    // println!("non_udp: {}", non_udp);
-    // println!("wrong_port: {}", wrong_port);
-    // println!("not_a_price_quote: {}", not_a_price_quote);
+    parse_stats.successfully_parsed = price_quotes.len() as u64;
 
-    price_quotes
+    (price_quotes, parse_stats)
 }

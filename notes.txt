@@ -1,0 +1,18 @@
+02 - B6           - data type
+02 - 03           - information type
+01 - 4            - market type
+12 - KR4301F42959 - issue code
+03 - 133          - issue seq number
+02 - 11           - market status type
+07 - 0000938      - total bid quote volume
+05 - 02840        - best bid price 1
+07 - 0000009      - best bid qty 1
+05 - 02835        - best bid price 2
+07 - 0000000      - best bid qty 2
+05 - 02830        - best bid price 3
+07 - 0000000      - best bid qty 4
+05 - 02825        - best bid price 4
+07 - 0000009      - best bid qty 4
+05 - 02820        - best bid price 5
+
+
